@@ -1,0 +1,38 @@
+# Environment
+.env
+*.env
+
+# Inbox (user data — never commit)
+inbox/
+*.epub
+*.mobi
+*.pdf
+*.azw3
+*.fb2
+*.lit
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Docker
+.dockerignore
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

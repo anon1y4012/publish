@@ -1,0 +1,16 @@
+services:
+  epubsync:
+    image: ghcr.io/YOUR_USERNAME/epubsync:latest
+    # Or build locally:
+    # build: .
+    container_name: epubsync
+    restart: unless-stopped
+    ports:
+      - "8765:8765"       # Remove/change this if using a reverse proxy (Cloudflare tunnel, nginx, etc.)
+    volumes:
+      - ./inbox:/inbox    # Local folder that receives EPUBs — point Calibre here too
+    environment:
+      EPUBSYNC_TOKEN: "change-me-to-a-long-random-secret"
+      EPUBSYNC_PORT: "8765"
+      EPUBSYNC_HOST: "0.0.0.0"
+      # EPUBSYNC_INBOX is set to /inbox inside the container — mount above controls actual path
