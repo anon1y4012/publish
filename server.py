@@ -528,7 +528,7 @@ input:focus{border-bottom-color:var(--accent)}
     <div class="settings-row">
       <div class="settings-row-info">
         <div class="settings-row-label">Password</div>
-        <div class="settings-row-desc">Used to log in to the web UI on any device.</div>
+        <div class="settings-row-desc">Used to log in to the web UI.</div>
       </div>
       <div class="settings-row-ctrl">
         <input type="password" id="newPw" placeholder="New password" autocomplete="new-password">
@@ -543,7 +543,7 @@ input:focus{border-bottom-color:var(--accent)}
     <div class="settings-row">
       <div class="settings-row-info">
         <div class="settings-row-label">Current key</div>
-        <div class="settings-row-desc">Used as <code>X-Publish-Token</code> in API calls, iOS Shortcuts, and the KOReader plugin. Format: three-word-phrase — easy to type on a Kindle. Regenerating invalidates the old key immediately.</div>
+        <div class="settings-row-desc">Used as <code>X-Publish-Token</code> in API calls, iOS Shortcuts, and the KOReader plugin. Regenerating invalidates the old key immediately.</div>
       </div>
       <div class="settings-row-ctrl">
         <div class="api-row">
