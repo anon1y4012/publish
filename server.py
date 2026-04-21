@@ -34,8 +34,9 @@ from flask import (
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("EPUBSYNC_SECRET_KEY") or os.urandom(32)
-app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SECURE'] = False
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # ---------------------------------------------------------------------------
 # Config (environment-first, then CLI args, then defaults)
