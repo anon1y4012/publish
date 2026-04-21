@@ -8,7 +8,7 @@ services:
       PUBLISH_HOST: "0.0.0.0"
       PUBLISH_SECRET_KEY: "change-me-too"
     volumes:
-      - /Users/johnlaughlin/publish:/inbox
+      - /Users/USERNAME/publish:/inbox
     ports:
       - 8765:8765
     restart: unless-stopped

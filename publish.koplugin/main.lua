@@ -1,31 +1,31 @@
 --[[
 publish.koplugin
------------------
-On device wake/resume, connects to your home server and downloads any
-new EPUBs that aren't already present in the local inbox folder.
+----------------
+On device wake/resume, waits for WiFi to associate naturally (no prompts),
+then syncs with the Publish server. Only notifies if new books were delivered.
 
-Server API (see server/publish_server.py):
+Server API:
   GET /manifest          → JSON: { "files": ["book.epub", ...] }
   GET /download/<file>   → raw EPUB bytes
 
-Config is stored in KOReader's settings under "publish".
+Config stored in KOReader settings under "publish".
 --]]
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local NetworkMgr     = require("ui/network/manager")
-local DataStorage    = require("datastorage")
-local UIManager      = require("ui/uimanager")
-local InfoMessage    = require("ui/widget/infomessage")
-local Event          = require("ui/event")
-local logger         = require("logger")
-local json           = require("json")
-local lfs            = require("libs/libkoreader-lfs")
-local http           = require("socket/http")
-local ltn12          = require("ltn12")
-local _              = require("gettext")
+local NetworkMgr      = require("ui/network/manager")
+local UIManager       = require("ui/uimanager")
+local InfoMessage     = require("ui/widget/infomessage")
+local Event           = require("ui/event")
+local logger          = require("logger")
+local json            = require("json")
+local lfs             = require("libs/libkoreader-lfs")
+local http            = require("socket/http")
+local ltn12           = require("ltn12")
+local socket          = require("socket")
+local _               = require("gettext")
 
 -- ---------------------------------------------------------------------------
--- Plugin definition
+-- Plugin
 -- ---------------------------------------------------------------------------
 
 local Publish = WidgetContainer:extend{
@@ -33,62 +33,103 @@ local Publish = WidgetContainer:extend{
     is_doc_only = false,
 }
 
--- Default settings (overridden by user config)
 local DEFAULTS = {
-    server_url  = "https://mini-publish.silentmail.org",  -- no trailing slash
-    inbox_dir   = "/mnt/us/publish",                       -- Kindle path; change for Kobo etc.
-    api_token   = "",                                        -- shared secret header value
-    auto_sync   = true,                                      -- sync on every resume
-    notify      = true,                                      -- show toast on completion
+    server_url   = "https://mini-publish.silentmail.org",
+    inbox_dir    = "/mnt/us/books",
+    api_token    = "",
+    auto_sync    = true,
+    -- How long to wait after wake before attempting sync (seconds).
+    -- Gives WiFi time to associate without any prompts.
+    wake_delay   = 8,
+    -- How many seconds to keep retrying if the first attempt fails
+    -- (covers slow DHCP / captive portal situations).
+    retry_window = 30,
+    retry_interval = 5,
 }
 
 -- ---------------------------------------------------------------------------
--- Lifecycle
+-- Init
 -- ---------------------------------------------------------------------------
 
 function Publish:init()
     self.settings = G_reader_settings:readSetting("publish") or {}
-    -- Merge defaults for any missing keys
     for k, v in pairs(DEFAULTS) do
         if self.settings[k] == nil then
             self.settings[k] = v
         end
     end
-
-    -- Register menu entry (appears in Tools menu)
     self.ui.menu:registerToMainMenu(self)
 end
 
+-- ---------------------------------------------------------------------------
+-- Wake / resume entry point
+-- ---------------------------------------------------------------------------
+
 function Publish:onResume()
-    if self.settings.auto_sync then
-        -- willRerunWhenOnline defers the callback until WiFi is up,
-        -- showing a "Connecting..." UI if needed. Returns true and
-        -- schedules the callback if wifi was off; returns false if
-        -- already online (so we call manually in that case).
-        if not NetworkMgr:willRerunWhenOnline(function()
-            self:_doSync(false)
-        end) then
-            self:_doSync(false)
-        end
-    end
+    if not self.settings.auto_sync then return end
+
+    -- Schedule the sync attempt after wake_delay seconds.
+    -- UIManager:scheduleIn is non-blocking — the user sees their book
+    -- or home screen immediately with no WiFi prompt.
+    UIManager:scheduleIn(self.settings.wake_delay, function()
+        self:_syncWhenReady()
+    end)
 end
 
--- Also run when KOReader first starts (file manager view)
 function Publish:onStart()
-    self:onResume()
+    -- On first launch give a slightly shorter delay since WiFi may already be up.
+    if not self.settings.auto_sync then return end
+    UIManager:scheduleIn(3, function()
+        self:_syncWhenReady()
+    end)
 end
 
 -- ---------------------------------------------------------------------------
--- Core sync logic
+-- WiFi-aware sync with retry loop
+-- ---------------------------------------------------------------------------
+
+function Publish:_syncWhenReady()
+    -- If WiFi is completely disabled, use willRerunWhenOnline so KOReader
+    -- handles the "turn on WiFi?" flow the way the user has it configured.
+    -- We do NOT call this when WiFi is already enabled but just associating —
+    -- that case is handled by the retry loop below.
+    if NetworkMgr.wifi_was_on == false then
+        -- WiFi was explicitly off; let KOReader decide whether to prompt.
+        NetworkMgr:willRerunWhenOnline(function()
+            self:_doSync(false)
+        end)
+        return
+    end
+
+    -- WiFi is enabled (or state unknown). Attempt sync; retry on failure
+    -- to cover the window while DHCP / association completes.
+    local deadline = socket.gettime() + self.settings.retry_window
+    local attempt
+
+    attempt = function()
+        if NetworkMgr:isOnline() then
+            self:_doSync(false)
+        elseif socket.gettime() < deadline then
+            UIManager:scheduleIn(self.settings.retry_interval, attempt)
+        else
+            logger.info("Publish: WiFi did not come up within retry window, skipping sync")
+        end
+    end
+
+    attempt()
+end
+
+-- ---------------------------------------------------------------------------
+-- Core sync
 -- ---------------------------------------------------------------------------
 
 function Publish:_doSync(interactive)
     local cfg = self.settings
 
-    -- Ensure inbox directory exists
+    -- Ensure inbox exists
     lfs.mkdir(cfg.inbox_dir)
 
-    -- ---- 1. Fetch manifest ------------------------------------------------
+    -- 1. Fetch manifest -------------------------------------------------------
     local manifest_url = cfg.server_url .. "/manifest"
     local resp_body    = {}
     local headers      = { ["X-Publish-Token"] = cfg.api_token }
@@ -98,6 +139,7 @@ function Publish:_doSync(interactive)
         method  = "GET",
         headers = headers,
         sink    = ltn12.sink.table(resp_body),
+        timeout = 15,
     })
 
     if not ok or code ~= 200 then
@@ -120,7 +162,7 @@ function Publish:_doSync(interactive)
         return
     end
 
-    -- ---- 2. Diff against local inbox -------------------------------------
+    -- 2. Diff against local inbox --------------------------------------------
     local local_files = {}
     for entry in lfs.dir(cfg.inbox_dir) do
         local_files[entry] = true
@@ -134,7 +176,8 @@ function Publish:_doSync(interactive)
     end
 
     if #to_download == 0 then
-        logger.dbg("Publish: inbox up to date, nothing to download")
+        -- Nothing new — stay silent. No toast, no notification.
+        logger.dbg("Publish: inbox up to date")
         if interactive then
             UIManager:show(InfoMessage:new{
                 text    = _("Publish: already up to date."),
@@ -144,7 +187,7 @@ function Publish:_doSync(interactive)
         return
     end
 
-    -- ---- 3. Download each new file ---------------------------------------
+    -- 3. Download new files --------------------------------------------------
     local downloaded = 0
     local failed     = 0
 
@@ -152,10 +195,9 @@ function Publish:_doSync(interactive)
         local dest_path = cfg.inbox_dir .. "/" .. fname
         local out_file, open_err = io.open(dest_path, "wb")
         if not out_file then
-            logger.warn("Publish: cannot open", dest_path, "for writing:", open_err)
+            logger.warn("Publish: cannot open", dest_path, ":", open_err)
             failed = failed + 1
         else
-            -- URL-encode just the filename (handle spaces, etc.)
             local safe_fname = fname:gsub("([^%w%-_%.~])", function(c)
                 return string.format("%%%02X", string.byte(c))
             end)
@@ -165,11 +207,11 @@ function Publish:_doSync(interactive)
                 method  = "GET",
                 headers = headers,
                 sink    = ltn12.sink.file(out_file),
+                timeout = 60,
             })
-            -- ltn12.sink.file closes the file on completion
             if not dl_ok or dl_code ~= 200 then
                 logger.warn("Publish: download failed for", fname, "code=", dl_code)
-                os.remove(dest_path)   -- clean up partial file
+                os.remove(dest_path)
                 failed = failed + 1
             else
                 logger.info("Publish: downloaded", fname)
@@ -178,28 +220,38 @@ function Publish:_doSync(interactive)
         end
     end
 
-    -- ---- 4. Refresh file browser if anything was downloaded --------------
+    -- 4. Refresh file browser ------------------------------------------------
     if downloaded > 0 then
         UIManager:broadcastEvent(Event:new("FileManagerRefresh"))
     end
 
-    -- ---- 5. Notify -------------------------------------------------------
-    if cfg.notify or interactive then
+    -- 5. Notify — only if something actually arrived -------------------------
+    -- We never show a toast when there's nothing new (handled by early return
+    -- above). Here we only show on success or partial failure.
+    if downloaded > 0 or (interactive and failed > 0) then
         local msg
         if failed == 0 then
-            msg = string.format(_("Publish: downloaded %d new book(s)."), downloaded)
+            if downloaded == 1 then
+                -- Show the actual filename so the user knows what arrived
+                msg = string.format(_("New book delivered:\n%s"), to_download[1])
+            else
+                msg = string.format(_("%d new books delivered."), downloaded)
+            end
         else
             msg = string.format(
-                _("Publish: %d downloaded, %d failed. Check log."),
+                _("Publish: %d delivered, %d failed."),
                 downloaded, failed
             )
         end
-        UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
+        UIManager:show(InfoMessage:new{
+            text    = msg,
+            timeout = 4,
+        })
     end
 end
 
 -- ---------------------------------------------------------------------------
--- Settings menu (Tools → Publish)
+-- Settings menu  (Tools → Publish)
 -- ---------------------------------------------------------------------------
 
 function Publish:addToMainMenu(menu_items)
@@ -209,10 +261,12 @@ function Publish:addToMainMenu(menu_items)
             {
                 text = _("Sync now"),
                 callback = function()
-                    if not NetworkMgr:willRerunWhenOnline(function()
+                    if NetworkMgr:isOnline() then
                         self:_doSync(true)
-                    end) then
-                        self:_doSync(true)
+                    else
+                        NetworkMgr:willRerunWhenOnline(function()
+                            self:_doSync(true)
+                        end)
                     end
                 end,
             },
@@ -229,13 +283,13 @@ function Publish:addToMainMenu(menu_items)
             },
             {
                 text_func = function()
-                    return self.settings.notify
-                        and _("Notifications: ON")
-                        or  _("Notifications: OFF")
+                    return string.format(_("Wake delay: %ds"), self.settings.wake_delay)
                 end,
                 callback = function()
-                    self.settings.notify = not self.settings.notify
-                    self:_saveSettings()
+                    self:_promptNumber(
+                        _("Seconds to wait after wake before syncing"),
+                        "wake_delay", 1, 60
+                    )
                 end,
             },
             {
@@ -252,9 +306,9 @@ function Publish:addToMainMenu(menu_items)
                 text = _("API token…"),
                 callback = function()
                     self:_promptSetting(
-                        _("API token (shared secret)"),
+                        _("API token"),
                         "api_token",
-                        _("leave blank to disable auth")
+                        _("your PUBLISH_TOKEN value")
                     )
                 end,
             },
@@ -264,7 +318,7 @@ function Publish:addToMainMenu(menu_items)
                     self:_promptSetting(
                         _("Local inbox path"),
                         "inbox_dir",
-                        _("/mnt/us/publish")
+                        _("/mnt/us/books")
                     )
                 end,
             },
@@ -284,20 +338,50 @@ function Publish:_promptSetting(title, key, hint)
     local InputDialog = require("ui/widget/inputdialog")
     local dialog
     dialog = InputDialog:new{
-        title       = title,
-        input       = self.settings[key] or "",
-        input_hint  = hint,
+        title      = title,
+        input      = self.settings[key] or "",
+        input_hint = hint,
         buttons = {{
             {
-                text = _("Cancel"),
+                text     = _("Cancel"),
                 callback = function() UIManager:close(dialog) end,
             },
             {
-                text     = _("Save"),
+                text             = _("Save"),
                 is_enter_default = true,
-                callback = function()
+                callback         = function()
                     self.settings[key] = dialog:getInputText()
                     self:_saveSettings()
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function Publish:_promptNumber(title, key, min, max)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new{
+        title      = title,
+        input      = tostring(self.settings[key] or DEFAULTS[key]),
+        input_type = "number",
+        buttons = {{
+            {
+                text     = _("Cancel"),
+                callback = function() UIManager:close(dialog) end,
+            },
+            {
+                text             = _("Save"),
+                is_enter_default = true,
+                callback         = function()
+                    local v = tonumber(dialog:getInputText())
+                    if v and v >= min and v <= max then
+                        self.settings[key] = v
+                        self:_saveSettings()
+                    end
                     UIManager:close(dialog)
                 end,
             },
