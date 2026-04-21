@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import random
 import secrets
 import shutil
 import sys
@@ -15,6 +16,36 @@ import time
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
+
+# ---------------------------------------------------------------------------
+# Word list for human-readable API keys  e.g. "swift-maple-frost"
+# 200 short, unambiguous, easy-to-type words.
+# ---------------------------------------------------------------------------
+_WORDS = [
+    "amber","anchor","apple","arrow","atlas","azure","badge","basin","birch","blade",
+    "blaze","bloom","bough","brave","brook","cargo","cedar","chalk","chase","cliff",
+    "cloak","cloud","cobalt","coral","crane","crest","crisp","crown","cubic","cycle",
+    "delta","depot","draft","drift","dunes","eagle","ember","epoch","falls","fauna",
+    "fawn","feast","fern","field","flame","flare","fleet","flint","flora","flume",
+    "focus","forge","forte","frost","grain","grand","grove","guide","haven","hazel",
+    "heath","hedge","helix","holly","honey","hound","inlet","ivory","kelp","lance",
+    "larch","laser","latch","layer","ledge","lever","light","linen","lodge","lunar",
+    "maple","marsh","merit","metro","mirth","mocha","mount","noble","nomad","north",
+    "notch","novel","oaken","ocean","olive","onset","ozone","paint","patch","pearl",
+    "petal","pilot","pitch","pixel","plain","plank","plaza","plume","polar","prism",
+    "prose","pulse","quartz","radar","rally","ranch","rapid","raven","realm","resin",
+    "ridge","rivet","robin","rocky","roost","rowan","sable","scout","shelf","shift",
+    "shore","sigma","slate","solar","solid","sonic","spark","spire","spray","sprig",
+    "stave","steam","steel","stern","stoke","stone","storm","stout","straw","suite",
+    "surge","swale","swift","sword","talon","tawny","tenor","terra","thorn","tidal",
+    "tiger","timer","torch","totem","tower","trace","track","trade","trail","trait",
+    "trout","trove","tulip","tundra","ultra","unity","upper","vapor","vault","vigor",
+    "viola","viper","visor","vista","vocal","voter","wader","waltz","watch","water",
+]
+
+def _gen_api_key() -> str:
+    """Generate a human-readable 3-word hyphenated API key."""
+    return "-".join(random.choices(_WORDS, k=3))
 
 from flask import (
     Flask, abort, jsonify, redirect, render_template_string,
@@ -334,7 +365,7 @@ input:focus{border-bottom-color:var(--accent)}
   {% elif step == 2 %}
   <div class="card">
     <div class="card-title">Your API key</div>
-    <div class="card-sub">This key authenticates external clients — your iOS Shortcut, Calibre script, and the KOReader plugin. Copy it now and keep it somewhere safe.</div>
+    <div class="card-sub">This key authenticates external clients — your iOS Shortcut, Calibre script, and the KOReader plugin. It's three words separated by hyphens, easy to type on a Kindle keyboard. Copy it now.</div>
     <form method="POST" action="/setup">
       <input type="hidden" name="step" value="2">
       <input type="hidden" name="api_key" id="apiKeyField" value="{{ api_key }}">
@@ -344,7 +375,7 @@ input:focus{border-bottom-color:var(--accent)}
           <span class="api-key-text" id="apiKeyDisplay">{{ api_key }}</span>
           <button type="button" class="copy-key" onclick="copyKey()">Copy</button>
         </div>
-        <div class="hint">Use this as the <strong>X-Publish-Token</strong> header in API calls and as the token in the KOReader plugin.</div>
+        <div class="hint">Use this as the <strong>X-Publish-Token</strong> header in API calls and as the token in the KOReader plugin settings. Three words separated by hyphens — easy to type on any device.</div>
         <button type="button" class="regen" onclick="regenKey()">↻ Generate a new key</button>
       </div>
       <div class="field">
@@ -512,7 +543,7 @@ input:focus{border-bottom-color:var(--accent)}
     <div class="settings-row">
       <div class="settings-row-info">
         <div class="settings-row-label">Current key</div>
-        <div class="settings-row-desc">Used as <code>X-Publish-Token</code> in API calls, iOS Shortcuts, and the KOReader plugin. Regenerating invalidates the old key immediately.</div>
+        <div class="settings-row-desc">Used as <code>X-Publish-Token</code> in API calls, iOS Shortcuts, and the KOReader plugin. Format: three-word-phrase — easy to type on a Kindle. Regenerating invalidates the old key immediately.</div>
       </div>
       <div class="settings-row-ctrl">
         <div class="api-row">
@@ -919,7 +950,7 @@ function copyCurl(){navigator.clipboard.writeText(document.getElementById('curlB
 
 @app.route("/setup/genkey")
 def genkey():
-    return jsonify({"key": secrets.token_urlsafe(32)})
+    return jsonify({"key": _gen_api_key()})
 
 @app.route("/setup", methods=["GET","POST"])
 def setup():
@@ -940,7 +971,7 @@ def setup():
                 return render_template_string(SETUP_HTML, step=1, error="Passwords don't match.", api_key="")
             # Store password hash in session temporarily until step 2 completes
             session["setup_pw_hash"] = hash_password(pw)
-            new_key = secrets.token_urlsafe(32)
+            new_key = _gen_api_key()
             return render_template_string(SETUP_HTML, step=2, error=None, api_key=new_key)
 
         if step == 2:
@@ -950,7 +981,7 @@ def setup():
             api_key     = request.form.get("api_key","").strip()
             archive_days = int(request.form.get("archive_days", 5))
             if not api_key:
-                api_key = secrets.token_urlsafe(32)
+                api_key = _gen_api_key()
             cfg = _read_cfg()
             cfg["password_hash"]  = pw_hash
             cfg["api_key"]        = api_key
@@ -963,7 +994,7 @@ def setup():
             return render_template_string(SETUP_HTML, step=3, error=None,
                                           api_key=api_key, archive_days=archive_days)
 
-    api_key = secrets.token_urlsafe(32) if step == 2 else ""
+    api_key = _gen_api_key() if step == 2 else ""
     return render_template_string(SETUP_HTML, step=step, error=None, api_key=api_key)
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1046,7 @@ def settings_apikey():
     r = check_web_auth()
     if r: return r
     cfg = _read_cfg()
-    cfg["api_key"] = secrets.token_urlsafe(32)
+    cfg["api_key"] = _gen_api_key()
     _write_cfg(cfg)
     return jsonify({"api_key": cfg["api_key"]})
 
