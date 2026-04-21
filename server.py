@@ -34,13 +34,15 @@ from flask import (
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("EPUBSYNC_SECRET_KEY") or os.urandom(32)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # ---------------------------------------------------------------------------
 # Config (environment-first, then CLI args, then defaults)
 # ---------------------------------------------------------------------------
 
 INBOX_DIR: Path = Path(os.environ.get("EPUBSYNC_INBOX", "./inbox"))
-API_TOKEN: str  = os.environ.get("EPUBSYNC_TOKEN", "")
+API_TOKEN: str = os.environ.get("EPUBSYNC_TOKEN", "")
 ALLOWED_EXTENSIONS = {".epub", ".mobi", ".pdf", ".fb2", ".azw3", ".lit"}
 START_TIME = time.time()
 
@@ -48,20 +50,25 @@ START_TIME = time.time()
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+
 def check_api_auth():
     if API_TOKEN and request.headers.get("X-EpubSync-Token") != API_TOKEN:
         abort(401, description="Invalid or missing X-EpubSync-Token header")
+
 
 def check_web_auth():
     if API_TOKEN and not session.get("authed"):
         return redirect(url_for("login"))
 
+
 def is_allowed(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
 
 def safe_name(filename: str) -> str:
     """Strip path components to prevent directory traversal."""
     return Path(filename).name
+
 
 def fmt_size(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
@@ -70,10 +77,12 @@ def fmt_size(n: int) -> str:
         n /= 1024
     return f"{n:.1f} GB"
 
+
 def get_files() -> list:
     out = []
     try:
-        entries = sorted(INBOX_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)
+        entries = sorted(INBOX_DIR.iterdir(),
+                         key=lambda x: x.stat().st_mtime, reverse=True)
     except FileNotFoundError:
         return out
     for f in entries:
@@ -92,6 +101,7 @@ def get_files() -> list:
 # ---------------------------------------------------------------------------
 # Templates
 # ---------------------------------------------------------------------------
+
 
 LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -378,6 +388,7 @@ function copyCurl(){
 # Routes — web
 # ---------------------------------------------------------------------------
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -387,10 +398,12 @@ def login():
         return render_template_string(LOGIN_HTML, error="Invalid token.")
     return render_template_string(LOGIN_HTML, error=None)
 
+
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
 
 @app.route("/")
 def index():
@@ -405,10 +418,12 @@ def index():
 # Routes — API
 # ---------------------------------------------------------------------------
 
+
 @app.route("/upload", methods=["POST"])
 def upload():
     web_authed = bool(session.get("authed"))
-    api_authed = (not API_TOKEN) or (request.headers.get("X-EpubSync-Token") == API_TOKEN)
+    api_authed = (not API_TOKEN) or (
+        request.headers.get("X-EpubSync-Token") == API_TOKEN)
     if not (web_authed or api_authed):
         abort(401)
     files = request.files.getlist("file")
@@ -426,6 +441,7 @@ def upload():
         return jsonify({"error": errors}), 400
     return jsonify({"saved": saved, "errors": errors}), 200
 
+
 @app.route("/manifest")
 def manifest():
     check_api_auth()
@@ -435,10 +451,12 @@ def manifest():
     )
     return jsonify({"files": files})
 
+
 @app.route("/download/<path:filename>")
 def download(filename):
     web_authed = bool(session.get("authed"))
-    api_authed = (not API_TOKEN) or (request.headers.get("X-EpubSync-Token") == API_TOKEN)
+    api_authed = (not API_TOKEN) or (
+        request.headers.get("X-EpubSync-Token") == API_TOKEN)
     if not (web_authed or api_authed):
         abort(401)
     name = safe_name(filename)
@@ -446,10 +464,12 @@ def download(filename):
         abort(404)
     return send_from_directory(INBOX_DIR.resolve(), name, as_attachment=True)
 
+
 @app.route("/file/<path:filename>", methods=["DELETE"])
 def delete_file(filename):
     web_authed = bool(session.get("authed"))
-    api_authed = (not API_TOKEN) or (request.headers.get("X-EpubSync-Token") == API_TOKEN)
+    api_authed = (not API_TOKEN) or (
+        request.headers.get("X-EpubSync-Token") == API_TOKEN)
     if not (web_authed or api_authed):
         abort(401)
     name = safe_name(filename)
@@ -458,6 +478,7 @@ def delete_file(filename):
         abort(404)
     target.unlink()
     return jsonify({"deleted": name})
+
 
 @app.route("/health")
 def health():
@@ -476,14 +497,19 @@ def health():
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     global INBOX_DIR, API_TOKEN
 
     parser = argparse.ArgumentParser(description="EpubSync server")
-    parser.add_argument("--inbox", default=os.environ.get("EPUBSYNC_INBOX", "./inbox"))
-    parser.add_argument("--port",  default=int(os.environ.get("EPUBSYNC_PORT", 8765)), type=int)
-    parser.add_argument("--host",  default=os.environ.get("EPUBSYNC_HOST", "127.0.0.1"))
-    parser.add_argument("--token", default=os.environ.get("EPUBSYNC_TOKEN", ""))
+    parser.add_argument(
+        "--inbox", default=os.environ.get("EPUBSYNC_INBOX", "./inbox"))
+    parser.add_argument(
+        "--port",  default=int(os.environ.get("EPUBSYNC_PORT", 8765)), type=int)
+    parser.add_argument(
+        "--host",  default=os.environ.get("EPUBSYNC_HOST", "127.0.0.1"))
+    parser.add_argument(
+        "--token", default=os.environ.get("EPUBSYNC_TOKEN", ""))
     args = parser.parse_args()
 
     INBOX_DIR = Path(args.inbox).expanduser().resolve()
@@ -491,9 +517,11 @@ def main():
     API_TOKEN = args.token
 
     if not API_TOKEN:
-        print("WARNING: No token set — unauthenticated access enabled.", file=sys.stderr)
+        print("WARNING: No token set — unauthenticated access enabled.",
+              file=sys.stderr)
 
-    print(f"EpubSync  |  inbox: {INBOX_DIR}  |  http://{args.host}:{args.port}")
+    print(
+        f"EpubSync  |  inbox: {INBOX_DIR}  |  http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)
 
 
