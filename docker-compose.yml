@@ -1,16 +1,14 @@
 services:
-  epubsync:
-    image: ghcr.io/YOUR_USERNAME/epubsync:latest
-    # Or build locally:
-    # build: .
-    container_name: epubsync
-    restart: unless-stopped
-    ports:
-      - "8765:8765"       # Remove/change this if using a reverse proxy (Cloudflare tunnel, nginx, etc.)
-    volumes:
-      - ./inbox:/inbox    # Local folder that receives EPUBs — point Calibre here too
+  publish:
+    image: ghcr.io/anon1y4012/publish:latest
+    container_name: publish
     environment:
-      EPUBSYNC_TOKEN: "change-me-to-a-long-random-secret"
-      EPUBSYNC_PORT: "8765"
-      EPUBSYNC_HOST: "0.0.0.0"
-      # EPUBSYNC_INBOX is set to /inbox inside the container — mount above controls actual path
+      PUBLISH_TOKEN: "change-me"
+      PUBLISH_PORT: "8765"
+      PUBLISH_HOST: "0.0.0.0"
+      PUBLISH_SECRET_KEY: "change-me-too"
+    volumes:
+      - /Users/johnlaughlin/publish:/inbox
+    ports:
+      - 8765:8765
+    restart: unless-stopped

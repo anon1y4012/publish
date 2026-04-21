@@ -1,14 +1,14 @@
 --[[
-epubsync.koplugin
+publish.koplugin
 -----------------
 On device wake/resume, connects to your home server and downloads any
 new EPUBs that aren't already present in the local inbox folder.
 
-Server API (see server/epubsync_server.py):
+Server API (see server/publish_server.py):
   GET /manifest          → JSON: { "files": ["book.epub", ...] }
   GET /download/<file>   → raw EPUB bytes
 
-Config is stored in KOReader's settings under "epubsync".
+Config is stored in KOReader's settings under "publish".
 --]]
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -28,15 +28,15 @@ local _              = require("gettext")
 -- Plugin definition
 -- ---------------------------------------------------------------------------
 
-local EpubSync = WidgetContainer:extend{
-    name        = "epubsync",
+local Publish = WidgetContainer:extend{
+    name        = "publish",
     is_doc_only = false,
 }
 
 -- Default settings (overridden by user config)
 local DEFAULTS = {
-    server_url  = "https://your-tunnel.trycloudflare.com",  -- no trailing slash
-    inbox_dir   = "/mnt/us/epubsync",                       -- Kindle path; change for Kobo etc.
+    server_url  = "https://mini-publish.silentmail.org",  -- no trailing slash
+    inbox_dir   = "/mnt/us/publish",                       -- Kindle path; change for Kobo etc.
     api_token   = "",                                        -- shared secret header value
     auto_sync   = true,                                      -- sync on every resume
     notify      = true,                                      -- show toast on completion
@@ -46,8 +46,8 @@ local DEFAULTS = {
 -- Lifecycle
 -- ---------------------------------------------------------------------------
 
-function EpubSync:init()
-    self.settings = G_reader_settings:readSetting("epubsync") or {}
+function Publish:init()
+    self.settings = G_reader_settings:readSetting("publish") or {}
     -- Merge defaults for any missing keys
     for k, v in pairs(DEFAULTS) do
         if self.settings[k] == nil then
@@ -59,7 +59,7 @@ function EpubSync:init()
     self.ui.menu:registerToMainMenu(self)
 end
 
-function EpubSync:onResume()
+function Publish:onResume()
     if self.settings.auto_sync then
         -- willRerunWhenOnline defers the callback until WiFi is up,
         -- showing a "Connecting..." UI if needed. Returns true and
@@ -74,7 +74,7 @@ function EpubSync:onResume()
 end
 
 -- Also run when KOReader first starts (file manager view)
-function EpubSync:onStart()
+function Publish:onStart()
     self:onResume()
 end
 
@@ -82,7 +82,7 @@ end
 -- Core sync logic
 -- ---------------------------------------------------------------------------
 
-function EpubSync:_doSync(interactive)
+function Publish:_doSync(interactive)
     local cfg = self.settings
 
     -- Ensure inbox directory exists
@@ -91,7 +91,7 @@ function EpubSync:_doSync(interactive)
     -- ---- 1. Fetch manifest ------------------------------------------------
     local manifest_url = cfg.server_url .. "/manifest"
     local resp_body    = {}
-    local headers      = { ["X-EpubSync-Token"] = cfg.api_token }
+    local headers      = { ["X-Publish-Token"] = cfg.api_token }
 
     local ok, code = http.request({
         url     = manifest_url,
@@ -101,10 +101,10 @@ function EpubSync:_doSync(interactive)
     })
 
     if not ok or code ~= 200 then
-        logger.warn("EpubSync: manifest fetch failed, code=", code)
+        logger.warn("Publish: manifest fetch failed, code=", code)
         if interactive then
             UIManager:show(InfoMessage:new{
-                text    = _("EpubSync: could not reach server.\nCheck URL and token in settings."),
+                text    = _("Publish: could not reach server.\nCheck URL and token in settings."),
                 timeout = 4,
             })
         end
@@ -116,7 +116,7 @@ function EpubSync:_doSync(interactive)
         manifest = json.decode(table.concat(resp_body))
     end)
     if not parse_ok or not manifest or not manifest.files then
-        logger.warn("EpubSync: bad manifest JSON:", err)
+        logger.warn("Publish: bad manifest JSON:", err)
         return
     end
 
@@ -134,10 +134,10 @@ function EpubSync:_doSync(interactive)
     end
 
     if #to_download == 0 then
-        logger.dbg("EpubSync: inbox up to date, nothing to download")
+        logger.dbg("Publish: inbox up to date, nothing to download")
         if interactive then
             UIManager:show(InfoMessage:new{
-                text    = _("EpubSync: already up to date."),
+                text    = _("Publish: already up to date."),
                 timeout = 2,
             })
         end
@@ -152,7 +152,7 @@ function EpubSync:_doSync(interactive)
         local dest_path = cfg.inbox_dir .. "/" .. fname
         local out_file, open_err = io.open(dest_path, "wb")
         if not out_file then
-            logger.warn("EpubSync: cannot open", dest_path, "for writing:", open_err)
+            logger.warn("Publish: cannot open", dest_path, "for writing:", open_err)
             failed = failed + 1
         else
             -- URL-encode just the filename (handle spaces, etc.)
@@ -168,11 +168,11 @@ function EpubSync:_doSync(interactive)
             })
             -- ltn12.sink.file closes the file on completion
             if not dl_ok or dl_code ~= 200 then
-                logger.warn("EpubSync: download failed for", fname, "code=", dl_code)
+                logger.warn("Publish: download failed for", fname, "code=", dl_code)
                 os.remove(dest_path)   -- clean up partial file
                 failed = failed + 1
             else
-                logger.info("EpubSync: downloaded", fname)
+                logger.info("Publish: downloaded", fname)
                 downloaded = downloaded + 1
             end
         end
@@ -187,10 +187,10 @@ function EpubSync:_doSync(interactive)
     if cfg.notify or interactive then
         local msg
         if failed == 0 then
-            msg = string.format(_("EpubSync: downloaded %d new book(s)."), downloaded)
+            msg = string.format(_("Publish: downloaded %d new book(s)."), downloaded)
         else
             msg = string.format(
-                _("EpubSync: %d downloaded, %d failed. Check log."),
+                _("Publish: %d downloaded, %d failed. Check log."),
                 downloaded, failed
             )
         end
@@ -199,12 +199,12 @@ function EpubSync:_doSync(interactive)
 end
 
 -- ---------------------------------------------------------------------------
--- Settings menu (Tools → EpubSync)
+-- Settings menu (Tools → Publish)
 -- ---------------------------------------------------------------------------
 
-function EpubSync:addToMainMenu(menu_items)
-    menu_items.epubsync = {
-        text = _("EpubSync"),
+function Publish:addToMainMenu(menu_items)
+    menu_items.publish = {
+        text = _("Publish"),
         sub_item_table = {
             {
                 text = _("Sync now"),
@@ -244,7 +244,7 @@ function EpubSync:addToMainMenu(menu_items)
                     self:_promptSetting(
                         _("Server URL (no trailing slash)"),
                         "server_url",
-                        _("https://your-tunnel.trycloudflare.com")
+                        _("https://mini-publish.silentmail.org")
                     )
                 end,
             },
@@ -264,7 +264,7 @@ function EpubSync:addToMainMenu(menu_items)
                     self:_promptSetting(
                         _("Local inbox path"),
                         "inbox_dir",
-                        _("/mnt/us/epubsync")
+                        _("/mnt/us/publish")
                     )
                 end,
             },
@@ -276,11 +276,11 @@ end
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-function EpubSync:_saveSettings()
-    G_reader_settings:saveSetting("epubsync", self.settings)
+function Publish:_saveSettings()
+    G_reader_settings:saveSetting("publish", self.settings)
 end
 
-function EpubSync:_promptSetting(title, key, hint)
+function Publish:_promptSetting(title, key, hint)
     local InputDialog = require("ui/widget/inputdialog")
     local dialog
     dialog = InputDialog:new{
@@ -307,4 +307,4 @@ function EpubSync:_promptSetting(title, key, hint)
     dialog:onShowKeyboard()
 end
 
-return EpubSync
+return Publish
