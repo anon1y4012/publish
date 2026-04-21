@@ -3,12 +3,11 @@ services:
     image: ghcr.io/anon1y4012/publish:latest
     container_name: publish
     environment:
-      PUBLISH_TOKEN: "change-me"
       PUBLISH_PORT: "8765"
       PUBLISH_HOST: "0.0.0.0"
-      PUBLISH_SECRET_KEY: "change-me-too"
+      # PUBLISH_INBOX is /inbox inside the container — controlled by the volume below
     volumes:
-      - /Users/USERNAME/publish:/inbox
+      - /Users/johnlaughlin/publish:/inbox
     ports:
       - 8765:8765
     restart: unless-stopped
