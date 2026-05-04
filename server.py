@@ -657,6 +657,7 @@ header{height:var(--header-h);border-bottom:2px solid var(--ink);display:grid;gr
 .dz-icon{font-size:26px;opacity:.35;margin-bottom:8px}
 .dz-title{font-family:var(--serif);font-size:clamp(14px,1.8vw,17px);margin-bottom:4px;font-style:italic}
 .dz-sub{font-size:10px;color:var(--muted);line-height:1.7}
+.dz-cta{display:none}
 .dz-formats{margin-top:10px;display:flex;gap:4px;justify-content:center;flex-wrap:wrap}
 .fmt{font-size:9px;padding:2px 6px;border:1px solid var(--rule2);color:var(--muted2);letter-spacing:.06em;text-transform:uppercase}
 input[type=file]{display:none}
@@ -750,14 +751,39 @@ input[type=file]{display:none}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--rule2)}
 
-@media(max-width:640px){
-  body{background-image:none}
-  header,.body{grid-template-columns:1fr}
-  .header-brand{border-right:none}
+@media(max-width:720px),(hover:none) and (pointer:coarse) and (max-width:920px){
+  html,body{height:auto;min-height:100%;overflow:auto}
+  body{display:block;background-image:none}
+  header{height:auto;min-height:var(--header-h);display:block;position:relative}
+  .header-brand{min-height:var(--header-h);border-right:none;justify-content:center;padding:0 16px}
+  .brand-title{font-size:24px}
   .header-meta{display:none}
-  .panel-l{display:none}
-  .file-item{grid-template-columns:36px 1fr auto 72px}
+  .body{display:flex;flex-direction:column;overflow:visible;min-height:calc(100vh - var(--header-h))}
+  .panel-l{order:1;display:block;overflow:visible;border-right:none;border-bottom:2px solid var(--ink);background:var(--white)}
+  .panel-section{padding:18px clamp(16px,5vw,28px)}
+  .upload-section{min-height:calc(100vh - var(--header-h));min-height:calc(100svh - var(--header-h));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+  .upload-section .panel-label{width:min(100%,420px)}
+  .api-section{display:none}
+  .dropzone{width:min(100%,420px);min-height:clamp(220px,42svh,360px);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 20px;border-width:2px;background:var(--white);box-shadow:4px 4px 0 var(--rule)}
+  .dz-icon{font-size:38px;margin-bottom:12px}
+  .dz-title{font-size:24px;margin-bottom:8px}
+  .dz-sub{font-size:12px}
+  .dz-cta{display:inline-flex;align-items:center;justify-content:center;margin-top:16px;background:var(--ink);color:var(--paper);font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:11px 18px}
+  .dz-formats{margin-top:14px;max-width:260px}
+  .prog-list{width:min(100%,420px)}
+  .panel-r{order:2;display:block;overflow:visible;min-height:60vh}
+  .panel-r-head{height:auto;min-height:48px;position:sticky;top:0;z-index:30;padding:8px 12px;align-items:flex-start}
+  .filters{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;max-width:calc(100vw - 86px)}
+  .f-btn{padding:5px 9px}
+  .file-list{overflow:visible}
+  .sec-head{top:48px}
+  .file-item{grid-template-columns:36px minmax(0,1fr) auto 76px;padding:10px 12px;gap:8px}
   .file-size,.file-date{display:none}
+  .pill{font-size:8px;padding:2px 5px}
+  .file-acts{gap:3px}
+  .act{padding:4px 6px}
+  .empty-state{min-height:42vh;height:auto;padding:32px 20px}
+  #toast{left:14px;right:14px;bottom:14px;max-width:none;text-align:center}
 }
 </style>
 </head>
@@ -786,13 +812,14 @@ input[type=file]{display:none}
 
 <div class="body">
   <div class="panel-l">
-    <div class="panel-section">
+    <div class="panel-section upload-section">
       <div class="panel-label">Deliver</div>
       <div class="dropzone" id="dz">
         <input type="file" id="fi" multiple accept=".epub,.mobi,.pdf,.fb2,.azw3,.lit">
         <div class="dz-icon">📚</div>
-        <div class="dz-title">Drop files here</div>
-        <div class="dz-sub">or click to browse<br>Kindle pulls on next wake</div>
+        <div class="dz-title">Add books</div>
+        <div class="dz-sub">Click or tap to browse<br>or drop files here</div>
+        <div class="dz-cta">Choose files</div>
         <div class="dz-formats">
           <span class="fmt">epub</span><span class="fmt">mobi</span>
           <span class="fmt">pdf</span><span class="fmt">fb2</span><span class="fmt">azw3</span>
@@ -800,7 +827,7 @@ input[type=file]{display:none}
       </div>
       <div class="prog-list" id="progList"></div>
     </div>
-    <div class="panel-section">
+    <div class="panel-section api-section">
       <div class="panel-label">API</div>
       <div class="api-block">
         <div class="api-row-item"><span class="method m-get">GET</span><div><div class="api-path">/manifest</div><div class="api-desc">undelivered files</div></div></div>
@@ -836,7 +863,7 @@ input[type=file]{display:none}
       <div class="empty-state">
         <div class="empty-icon">P</div>
         <div class="empty-title">The queue is empty</div>
-        <div class="empty-sub">Drop books on the left to get started</div>
+        <div class="empty-sub">Add books above to get started</div>
       </div>
     {% else %}
       {% if queued %}
